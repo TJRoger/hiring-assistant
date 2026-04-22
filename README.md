@@ -15,7 +15,8 @@ AI-powered recruiting tool - evaluate resumes, generate tailored interview quest
 \`\`\`bash
 npm install
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# Edit .env and add your ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN
+# Optionally set ANTHROPIC_BASE_URL for proxy services
 npm run dev:full
 \`\`\`
 
@@ -30,14 +31,16 @@ npm start
 
 ## Get Your API Key
 
-Sign up at https://console.anthropic.com and create an API key.
+Sign up at https://console.anthropic.com and create an API key, or use a compatible proxy service with `ANTHROPIC_BASE_URL`.
 
 ## Deploy
 
 ### Vercel
 1. Push to GitHub
 2. Import project in Vercel
-3. Add environment variable \`ANTHROPIC_API_KEY\`
+3. Add environment variables:
+   - `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`
+   - `ANTHROPIC_BASE_URL` (optional, for proxy services)
 4. Deploy
 
 ### Docker

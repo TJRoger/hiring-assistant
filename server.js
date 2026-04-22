@@ -14,19 +14,20 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.warn('⚠️  Warning: ANTHROPIC_API_KEY not set. Copy .env.example to .env and add your key.');
+if (!process.env.ANTHROPIC_AUTH_TOKEN) {
+  console.warn('⚠️  Warning: ANTHROPIC_AUTH_TOKEN not set. Copy .env.example to .env and add your key.');
 }
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
+  apiKey: process.env.ANTHROPIC_AUTH_TOKEN,
+  ...(process.env.ANTHROPIC_BASE_URL && { baseURL: process.env.ANTHROPIC_BASE_URL })
 });
 
 app.post('/api/claude', async (req, res) => {
   try {
-    const { messages, system, max_tokens = 2000 } = req.body;
+    const { messages, system, max_tokens = 16000 } = req.body;
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-opus-4-7',
       max_tokens,
       messages,
       ...(system && { system })
@@ -45,5 +46,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(\`✅ Server running on http://localhost:\${PORT}\`);
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });

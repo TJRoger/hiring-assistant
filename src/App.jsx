@@ -82,14 +82,14 @@ export default function HiringAssistant() {
           <div className="flex bg-slate-100 rounded-lg p-1">
             <button
               onClick={() => { setView('recruiter'); setPage('jobs'); }}
-              className={\`px-4 py-1.5 text-sm font-medium rounded-md transition-colors \${view === 'recruiter' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}\`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'recruiter' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
               <Building2 className="w-4 h-4 inline mr-1.5" />
               Recruiter
             </button>
             <button
               onClick={() => { setView('candidate'); setPage('select'); }}
-              className={\`px-4 py-1.5 text-sm font-medium rounded-md transition-colors \${view === 'candidate' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}\`}
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'candidate' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
               <User className="w-4 h-4 inline mr-1.5" />
               Candidate
@@ -145,7 +145,7 @@ function RecruiterView({ page, setPage, jobs, saveJobs, candidates, saveCandidat
     try {
       const evaluation = await evaluateResume(selectedJob, resumeText, callClaude, parseJSON);
       const newCandidate = {
-        id: \`cand_\${Date.now()}\`,
+        id: `cand_${Date.now()}`,
         jobId: selectedJob.id,
         name: evaluation.name || fileName.replace('.pdf', ''),
         resumeText, fileName, evaluation,
@@ -217,7 +217,7 @@ function NewJob({ onCancel, onCreate }) {
   const [description, setDescription] = useState('');
   const handleSubmit = () => {
     if (!title.trim() || !description.trim()) return;
-    onCreate({ id: \`job_\${Date.now()}\`, title: title.trim(), description: description.trim(), createdAt: Date.now() });
+    onCreate({ id: `job_${Date.now()}`, title: title.trim(), description: description.trim(), createdAt: Date.now() });
   };
   return (
     <div className="max-w-2xl mx-auto">
@@ -385,7 +385,7 @@ function CandidateDetail({ candidate, job, onBack }) {
         <div className="flex items-center gap-2 mb-4">
           <FileText className="w-5 h-5 text-slate-400" />
           <h3 className="font-semibold text-slate-900">Resume Evaluation</h3>
-          <span className={\`ml-auto text-xs px-2.5 py-1 rounded-full font-medium \${ev.recommendation === 'invite' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}\`}>
+          <span className={`ml-auto text-xs px-2.5 py-1 rounded-full font-medium ${ev.recommendation === 'invite' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
             {ev.recommendation === 'invite' ? 'Recommend interview' : 'Do not proceed'}
           </span>
         </div>
@@ -436,12 +436,12 @@ function CandidateDetail({ candidate, job, onBack }) {
           <div className="flex items-center gap-2 mb-4">
             <Award className="w-5 h-5 text-slate-400" />
             <h3 className="font-semibold text-slate-900">Final Evaluation</h3>
-            <span className={\`ml-auto text-xs px-2.5 py-1 rounded-full font-medium \${
+            <span className={`ml-auto text-xs px-2.5 py-1 rounded-full font-medium ${
               fin.recommendation === 'strong_hire' ? 'bg-emerald-100 text-emerald-800' :
               fin.recommendation === 'hire' ? 'bg-emerald-50 text-emerald-700' :
               fin.recommendation === 'maybe' ? 'bg-amber-50 text-amber-700' :
               'bg-red-50 text-red-700'
-            }\`}>
+            }`}>
               {fin.recommendation === 'strong_hire' ? 'Strong hire' :
                fin.recommendation === 'hire' ? 'Hire' :
                fin.recommendation === 'maybe' ? 'Maybe' : 'No hire'}
@@ -615,7 +615,7 @@ function InterviewFlow({ candidate, job, onUpdate, onComplete, processing, callC
           <span>{job.title}</span>
         </div>
         <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-          <div className="h-full bg-slate-900 transition-all duration-300" style={{ width: \`\${progress}%\` }} />
+          <div className="h-full bg-slate-900 transition-all duration-300" style={{ width: `${progress}%` }} />
         </div>
       </div>
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-4">
@@ -644,15 +644,15 @@ function InterviewFlow({ candidate, job, onUpdate, onComplete, processing, callC
 }
 
 async function evaluateResume(job, resumeText, callClaude, parseJSON) {
-  const prompt = \`You are a senior technical recruiter evaluating a candidate's resume against a specific role.
+  const prompt = `You are a senior technical recruiter evaluating a candidate's resume against a specific role.
 
-JOB TITLE: \${job.title}
+JOB TITLE: ${job.title}
 
 JOB DESCRIPTION:
-\${job.description}
+${job.description}
 
 CANDIDATE RESUME:
-\${resumeText}
+${resumeText}
 
 Evaluate this candidate fairly and rigorously. Respond ONLY with a JSON object (no markdown, no preamble) with this exact structure:
 
@@ -665,21 +665,21 @@ Evaluate this candidate fairly and rigorously. Respond ONLY with a JSON object (
   "recommendation": "<'invite' if score >= 65 and candidate seems qualified, otherwise 'decline'>"
 }
 
-Be specific and reference concrete details from the resume. Do not be overly generous — only recommend invite if there's a genuine fit.\`;
+Be specific and reference concrete details from the resume. Do not be overly generous — only recommend invite if there's a genuine fit.`;
   const text = await callClaude(prompt);
   return parseJSON(text);
 }
 
 async function generateQuestions(job, resumeText, callClaude, parseJSON) {
-  const prompt = \`You are preparing an interview for a candidate. Generate 4 tailored interview questions based on the job and their specific resume.
+  const prompt = `You are preparing an interview for a candidate. Generate 4 tailored interview questions based on the job and their specific resume.
 
-JOB TITLE: \${job.title}
+JOB TITLE: ${job.title}
 
 JOB DESCRIPTION:
-\${job.description}
+${job.description}
 
 CANDIDATE RESUME:
-\${resumeText}
+${resumeText}
 
 Generate 4 questions that:
 1. The first is a warm-up / intro question about their background and interest in the role
@@ -692,19 +692,19 @@ Respond ONLY with a JSON object (no markdown):
   "questions": ["<q1>", "<q2>", "<q3>", "<q4>"]
 }
 
-Keep each question concise (1-2 sentences). Make them specific to this candidate and role, not generic.\`;
+Keep each question concise (1-2 sentences). Make them specific to this candidate and role, not generic.`;
   const text = await callClaude(prompt);
   return parseJSON(text).questions;
 }
 
 async function generateFollowUp(job, resumeText, question, answer, callClaude) {
-  const prompt = \`You are an interviewer. A candidate just answered a question. Generate ONE smart follow-up question that digs deeper into their response.
+  const prompt = `You are an interviewer. A candidate just answered a question. Generate ONE smart follow-up question that digs deeper into their response.
 
-ROLE: \${job.title}
+ROLE: ${job.title}
 
-ORIGINAL QUESTION: \${question}
+ORIGINAL QUESTION: ${question}
 
-CANDIDATE'S ANSWER: \${answer}
+CANDIDATE'S ANSWER: ${answer}
 
 Your follow-up should:
 - Probe for specifics, examples, or reasoning they didn't provide
@@ -712,28 +712,28 @@ Your follow-up should:
 - Be directly tied to something they said
 - Be one clear question (1-2 sentences max)
 
-Respond with ONLY the follow-up question text, nothing else. No preamble, no quotation marks.\`;
+Respond with ONLY the follow-up question text, nothing else. No preamble, no quotation marks.`;
   const text = await callClaude(prompt);
   return text.trim().replace(/^["']|["']$/g, '');
 }
 
 async function evaluateInterview(job, candidate, callClaude, parseJSON) {
   const interviewText = candidate.interview.rounds.map((r, i) =>
-    \`Q\${i + 1}: \${r.question}\nAnswer: \${r.answer}\${r.followUp ? \`\n\nFollow-up: \${r.followUp}\nAnswer: \${r.followUpAnswer}\` : ''}\`
+    `Q${i + 1}: ${r.question}\nAnswer: ${r.answer}${r.followUp ? `\n\nFollow-up: ${r.followUp}\nAnswer: ${r.followUpAnswer}` : ''}`
   ).join('\n\n---\n\n');
 
-  const prompt = \`You are a senior hiring manager producing a final evaluation for a candidate based on their resume AND interview responses.
+  const prompt = `You are a senior hiring manager producing a final evaluation for a candidate based on their resume AND interview responses.
 
-JOB TITLE: \${job.title}
+JOB TITLE: ${job.title}
 
 JOB DESCRIPTION:
-\${job.description}
+${job.description}
 
 CANDIDATE RESUME:
-\${candidate.resumeText}
+${candidate.resumeText}
 
 INTERVIEW RESPONSES:
-\${interviewText}
+${interviewText}
 
 Produce a rigorous final evaluation. Respond ONLY with a JSON object (no markdown):
 
@@ -751,7 +751,7 @@ Produce a rigorous final evaluation. Respond ONLY with a JSON object (no markdow
   "recommendation": "<one of: 'strong_hire', 'hire', 'maybe', 'no_hire'>"
 }
 
-Be rigorous and specific. Reference concrete things from their answers.\`;
+Be rigorous and specific. Reference concrete things from their answers.`;
   const text = await callClaude(prompt);
   return parseJSON(text);
 }
