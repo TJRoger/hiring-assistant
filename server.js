@@ -56,7 +56,41 @@ const anthropic = new Anthropic({
   ...(process.env.ANTHROPIC_BASE_URL && { baseURL: process.env.ANTHROPIC_BASE_URL })
 });
 
-app.post('/api/claude', async (req, res) => {
+function requireAuth(req, res, next) {
+  if (!req.session.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  const user = users.find(u => u.username === username && u.password === password);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  req.session.user = { username: user.username };
+  res.json({ username: user.username });
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
+  });
+});
+
+app.get('/api/me', (req, res) => {
+  if (!req.session.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json(req.session.user);
+});
+
+app.post('/api/claude', requireAuth, async (req, res) => {
   try {
     const { messages, system, max_tokens = 16000 } = req.body;
     const response = await anthropic.messages.create({
