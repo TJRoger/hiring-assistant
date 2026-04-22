@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Users, Upload, FileText, CheckCircle2, XCircle, Clock, ArrowLeft, Plus, Send, Loader2, Sparkles, TrendingUp, AlertCircle, ChevronRight, User, Building2, ClipboardCheck, MessageSquare, Award, Target, X } from 'lucide-react';
+import { Briefcase, Users, Upload, FileText, CheckCircle2, XCircle, Clock, ArrowLeft, Plus, Send, Loader2, Sparkles, TrendingUp, AlertCircle, ChevronRight, User, Building2, ClipboardCheck, MessageSquare, Award, Target, X, LogOut } from 'lucide-react';
+import LoginPage from './LoginPage.jsx';
 
 export default function HiringAssistant() {
   const [view, setView] = useState('recruiter');
@@ -11,8 +12,18 @@ export default function HiringAssistant() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => { loadData(); }, []);
+
+  useEffect(() => {
+    fetch('/api/me', { credentials: 'include' })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(user => setCurrentUser(user))
+      .catch(() => setCurrentUser(null))
+      .finally(() => setAuthChecked(true));
+  }, []);
 
   const loadData = async () => {
     try {
@@ -42,6 +53,7 @@ export default function HiringAssistant() {
     const response = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(body)
     });
     if (!response.ok) {
@@ -57,6 +69,23 @@ export default function HiringAssistant() {
     const match = clean.match(/\{[\s\S]*\}/);
     return JSON.parse(match ? match[0] : clean);
   };
+
+  const handleLogout = async () => {
+    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    setCurrentUser(null);
+  };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginPage onLogin={(user) => { setCurrentUser(user); loadData(); }} />;
+  }
 
   if (loading) {
     return (
@@ -79,21 +108,29 @@ export default function HiringAssistant() {
               <p className="text-xs text-slate-500">AI-powered candidate evaluation</p>
             </div>
           </div>
-          <div className="flex bg-slate-100 rounded-lg p-1">
-            <button
-              onClick={() => { setView('recruiter'); setPage('jobs'); }}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'recruiter' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              <Building2 className="w-4 h-4 inline mr-1.5" />
-              Recruiter
-            </button>
-            <button
-              onClick={() => { setView('candidate'); setPage('select'); }}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'candidate' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-            >
-              <User className="w-4 h-4 inline mr-1.5" />
-              Candidate
-            </button>
+          <div className="flex items-center gap-3">
+            <div className="flex bg-slate-100 rounded-lg p-1">
+              <button
+                onClick={() => { setView('recruiter'); setPage('jobs'); }}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'recruiter' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                <Building2 className="w-4 h-4 inline mr-1.5" />
+                Recruiter
+              </button>
+              <button
+                onClick={() => { setView('candidate'); setPage('select'); }}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'candidate' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                <User className="w-4 h-4 inline mr-1.5" />
+                Candidate
+              </button>
+            </div>
+            <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
+              <span className="text-sm text-slate-600">{currentUser.username}</span>
+              <button onClick={handleLogout} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100" title="Sign out">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
