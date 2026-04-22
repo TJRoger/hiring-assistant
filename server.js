@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import session from 'express-session';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -11,8 +13,39 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const usersConfigPath = path.join(__dirname, 'config', 'users.json');
+if (!fs.existsSync(usersConfigPath)) {
+  console.error('❌ Missing config/users.json. Copy config/users.example.json and add your users.');
+  process.exit(1);
+}
+
+let users;
+try {
+  users = JSON.parse(fs.readFileSync(usersConfigPath, 'utf-8')).users;
+} catch (e) {
+  console.error('❌ Invalid config/users.json:', e.message);
+  process.exit(1);
+}
+
+if (!process.env.SESSION_SECRET) {
+  console.error('❌ SESSION_SECRET not set in .env');
+  process.exit(1);
+}
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000
+  }
+}));
 
 if (!process.env.ANTHROPIC_AUTH_TOKEN) {
   console.warn('⚠️  Warning: ANTHROPIC_AUTH_TOKEN not set. Copy .env.example to .env and add your key.');
