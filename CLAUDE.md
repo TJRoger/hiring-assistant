@@ -22,6 +22,13 @@ AI-powered hiring assistant that evaluates resumes, generates interview question
 4. Response flows back through chain
 5. Data persisted via `window.storage` (localStorage wrapper)
 
+**Authentication Flow:**
+1. Browser loads app → `GET /api/me` checks session
+2. If no session → LoginPage shown
+3. `POST /api/login` validates against `config/users.json` → creates session
+4. Session cookie sent automatically on subsequent requests
+5. `POST /api/logout` destroys session → back to login
+
 **Single-File Component Structure:**
 - `src/App.jsx` (757 lines) contains entire UI
 - Main component: `HiringAssistant` - manages state and routing
@@ -59,6 +66,8 @@ npm start
 ## Environment Setup
 
 Required: Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`.
+
+Also required: Copy `config/users.example.json` to `config/users.json` and configure users. Set `SESSION_SECRET` in `.env`.
 
 The server will start without the key but API calls will fail.
 

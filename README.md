@@ -15,8 +15,9 @@ AI-powered recruiting tool - evaluate resumes, generate tailored interview quest
 \`\`\`bash
 npm install
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN
-# Optionally set ANTHROPIC_BASE_URL for proxy services
+# Edit .env: add ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, set SESSION_SECRET
+cp config/users.example.json config/users.json
+# Edit config/users.json: add your users
 npm run dev:full
 \`\`\`
 
