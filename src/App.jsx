@@ -252,9 +252,25 @@ function JobsList({ jobs, candidates, onOpen, onNew }) {
 function NewJob({ onCancel, onCreate, callClaude }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [aiState, setAiState] = useState('idle');
+  const [brief, setBrief] = useState('');
+  const [generatedDesc, setGeneratedDesc] = useState('');
+  const [aiError, setAiError] = useState(null);
   const handleSubmit = () => {
     if (!title.trim() || !description.trim()) return;
     onCreate({ id: `job_${Date.now()}`, title: title.trim(), description: description.trim(), createdAt: Date.now() });
+  };
+  const handleGenerate = async () => {
+    setAiState('generating');
+    setAiError(null);
+    try {
+      const result = await generateJobDescription(title, brief, callClaude);
+      setGeneratedDesc(result);
+      setAiState('preview');
+    } catch (e) {
+      setAiError('生成失败：' + e.message);
+      setAiState('input');
+    }
   };
   return (
     <div className="max-w-2xl mx-auto">
