@@ -175,7 +175,7 @@ export default function HiringAssistant() {
 
 function RecruiterView({ page, setPage, jobs, saveJobs, candidates, saveCandidates, selectedJob, setSelectedJob, selectedCandidate, setSelectedCandidate, processing, setProcessing, callClaude, parseJSON, setError }) {
   if (page === 'jobs') return <JobsList jobs={jobs} candidates={candidates} onOpen={(j) => { setSelectedJob(j); setPage('jobDetail'); }} onNew={() => setPage('newJob')} />;
-  if (page === 'newJob') return <NewJob onCancel={() => setPage('jobs')} onCreate={async (job) => { await saveJobs([...jobs, job]); setPage('jobs'); }} />;
+  if (page === 'newJob') return <NewJob onCancel={() => setPage('jobs')} onCreate={async (job) => { await saveJobs([...jobs, job]); setPage('jobs'); }} callClaude={callClaude} />;
   if (page === 'jobDetail') return <JobDetail job={selectedJob} candidates={candidates.filter(c => c.jobId === selectedJob.id)} onBack={() => setPage('jobs')} onUpload={async (resumeText, fileName) => {
     setProcessing(true);
     setError(null);
@@ -249,7 +249,7 @@ function JobsList({ jobs, candidates, onOpen, onNew }) {
   );
 }
 
-function NewJob({ onCancel, onCreate }) {
+function NewJob({ onCancel, onCreate, callClaude }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const handleSubmit = () => {
