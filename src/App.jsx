@@ -286,7 +286,71 @@ function NewJob({ onCancel, onCreate, callClaude }) {
             <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Senior Product Designer" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Job description</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-medium text-slate-700">Job description</label>
+              <button
+                type="button"
+                onClick={() => setAiState('input')}
+                disabled={!title.trim()}
+                className="flex items-center gap-1 text-xs text-violet-700 hover:text-violet-900 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="w-3 h-3" /> AI 生成
+              </button>
+            </div>
+            {aiState !== 'idle' && (
+              <div className="mb-3 border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={brief}
+                    onChange={e => setBrief(e.target.value)}
+                    placeholder="简要说明，例如：5年经验的高级前端工程师，熟悉 React"
+                    disabled={aiState === 'generating'}
+                    className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent disabled:bg-slate-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerate}
+                    disabled={!brief.trim() || aiState === 'generating'}
+                    className="px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {aiState === 'generating' ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 生成中...</> : '生成'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAiState('idle'); setBrief(''); setGeneratedDesc(''); setAiError(null); }}
+                    disabled={aiState === 'generating'}
+                    className="px-3 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-white disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                </div>
+                {aiError && <p className="text-xs text-red-600">{aiError}</p>}
+                {aiState === 'preview' && (
+                  <div className="space-y-2">
+                    <div className="bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                      {generatedDesc}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setDescription(generatedDesc); setAiState('idle'); setBrief(''); setGeneratedDesc(''); }}
+                        className="px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800"
+                      >
+                        使用此描述
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAiState('input')}
+                        className="px-3 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-white"
+                      >
+                        重新生成
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Include responsibilities, required skills, experience level..." rows={10} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent resize-none" />
           </div>
           <div className="flex gap-3 pt-2">
