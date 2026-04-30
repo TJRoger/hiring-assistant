@@ -334,14 +334,14 @@ function NewJob({ onCancel, onCreate, callClaude }) {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => { setDescription(generatedDesc); setAiState('idle'); setBrief(''); setGeneratedDesc(''); }}
+                        onClick={() => { setDescription(generatedDesc); setAiState('idle'); setBrief(''); setGeneratedDesc(''); setAiError(null); }}
                         className="px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800"
                       >
                         使用此描述
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAiState('input')}
+                        onClick={() => { setAiState('input'); setGeneratedDesc(''); setAiError(null); }}
                         className="px-3 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-white"
                       >
                         重新生成
