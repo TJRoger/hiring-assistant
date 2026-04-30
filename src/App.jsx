@@ -268,7 +268,7 @@ function NewJob({ onCancel, onCreate, callClaude }) {
       setGeneratedDesc(result);
       setAiState('preview');
     } catch (e) {
-      setAiError('生成失败：' + e.message);
+      setAiError('生成失败：' + (e?.message ?? String(e)));
       setAiState('input');
     }
   };
