@@ -792,3 +792,17 @@ Be rigorous and specific. Reference concrete things from their answers.`;
   const text = await callClaude(prompt);
   return parseJSON(text);
 }
+
+async function generateJobDescription(title, brief, callClaude) {
+  const prompt = `你是一位专业的 HR，请根据以下信息生成一份完整的岗位描述（中文）。
+
+岗位名称：${title}
+简要说明：${brief}
+
+要求：
+- 包含岗位职责（5-7 条）
+- 包含任职要求（5-7 条）
+- 语言专业、简洁，适合发布在招聘平台
+- 直接输出岗位描述正文，不要额外说明`;
+  return (await callClaude(prompt)).trim();
+}
