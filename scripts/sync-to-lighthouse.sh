@@ -29,7 +29,7 @@ echo "  -> Loading image ..."
 docker load < "${REMOTE_ARCHIVE}"
 
 echo "  -> Stopping existing container (if any) ..."
-EXISTING=\$(docker ps -q --filter "ancestor=${IMAGE}" --filter "ancestor=${IMAGE}:latest" 2>/dev/null || true)
+EXISTING=\$(docker ps -q --filter "ancestor=${IMAGE}:latest" 2>/dev/null || true)
 if [ -n "\$EXISTING" ]; then
   docker stop \$EXISTING
   docker rm \$EXISTING
