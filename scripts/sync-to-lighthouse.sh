@@ -31,7 +31,7 @@ echo "  -> Loading image ..."
 docker load < "${REMOTE_ARCHIVE}"
 
 echo "  -> Stopping existing container (if any) ..."
-EXISTING=\$(docker ps -q --filter "ancestor=${IMAGE}:latest" 2>/dev/null || true)
+EXISTING=\$(docker ps -q --filter "publish=3001" 2>/dev/null || true)
 if [ -n "\$EXISTING" ]; then
   echo "\$EXISTING" | xargs docker stop
   echo "\$EXISTING" | xargs docker rm
@@ -45,7 +45,7 @@ echo "==> [6/7] Cleaning up local archive ..."
 rm -f "${ARCHIVE}"
 
 echo "==> [7/7] Cleaning up remote archive ..."
-ssh "${REMOTE}" "rm -f ${REMOTE_ARCHIVE}"
+ssh "${REMOTE}" "rm -f ${REMOTE_ARCHIVE}" || true
 
 echo ""
 echo "Deployment complete. Container should be running on ${REMOTE_HOST}:3001"
