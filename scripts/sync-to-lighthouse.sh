@@ -9,6 +9,8 @@ REMOTE="$REMOTE_USER@$REMOTE_HOST"
 ARCHIVE="/tmp/${IMAGE}-${VERSION}.tar.gz"
 REMOTE_ARCHIVE="/tmp/${IMAGE}-${VERSION}.tar.gz"
 
+trap 'rm -f "${ARCHIVE}"' EXIT
+
 echo "==> [1/7] Verifying local image ${IMAGE}:${VERSION} ..."
 docker image inspect "${IMAGE}:${VERSION}" > /dev/null
 
@@ -31,8 +33,8 @@ docker load < "${REMOTE_ARCHIVE}"
 echo "  -> Stopping existing container (if any) ..."
 EXISTING=\$(docker ps -q --filter "ancestor=${IMAGE}:latest" 2>/dev/null || true)
 if [ -n "\$EXISTING" ]; then
-  docker stop \$EXISTING
-  docker rm \$EXISTING
+  echo "\$EXISTING" | xargs docker stop
+  echo "\$EXISTING" | xargs docker rm
 fi
 
 echo "  -> Starting container via startup script ..."
