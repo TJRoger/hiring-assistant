@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-v1.0.1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VERSION_FILE="${REPO_ROOT}/VERSION"
+
+if [ $# -ge 1 ]; then
+  VERSION="$1"
+else
+  [ -f "${VERSION_FILE}" ] || { echo "VERSION file not found at ${VERSION_FILE}"; exit 1; }
+  VERSION="$(tr -d '[:space:]' < "${VERSION_FILE}")"
+fi
+
 IMAGE="hiring-assistant"
 REMOTE_USER="work"
 REMOTE_HOST="119.28.54.112"
@@ -10,6 +20,8 @@ ARCHIVE="/tmp/${IMAGE}-${VERSION}.tar.gz"
 REMOTE_ARCHIVE="/tmp/${IMAGE}-${VERSION}.tar.gz"
 
 trap 'rm -f "${ARCHIVE}"' EXIT
+
+echo "==> Deploying ${IMAGE}:${VERSION}"
 
 echo "==> [1/7] Verifying local image ${IMAGE}:${VERSION} ..."
 docker image inspect "${IMAGE}:${VERSION}" > /dev/null
@@ -46,6 +58,17 @@ rm -f "${ARCHIVE}"
 
 echo "==> [7/7] Cleaning up remote archive ..."
 ssh "${REMOTE}" "rm -f ${REMOTE_ARCHIVE}" || true
+
+if [ $# -eq 0 ] && [ -f "${VERSION_FILE}" ]; then
+  CURRENT="$(tr -d '[:space:]' < "${VERSION_FILE}")"
+  if [[ "${CURRENT}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    NEXT="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+    echo "${NEXT}" > "${VERSION_FILE}"
+    echo "==> Bumped VERSION: ${CURRENT} -> ${NEXT}"
+  else
+    echo "==> Skipped VERSION bump (unrecognized format: ${CURRENT})"
+  fi
+fi
 
 echo ""
 echo "Deployment complete. Container should be running on ${REMOTE_HOST}:3001"
