@@ -268,7 +268,7 @@ function NewJob({ onCancel, onCreate, callClaude }) {
       setGeneratedDesc(result);
       setAiState('preview');
     } catch (e) {
-      setAiError('生成失败：' + (e?.message ?? String(e)));
+      setAiError('Generation failed: ' + (e?.message ?? String(e)));
       setAiState('input');
     }
   };
@@ -294,7 +294,7 @@ function NewJob({ onCancel, onCreate, callClaude }) {
                 disabled={!title.trim()}
                 className="flex items-center gap-1 text-xs text-violet-700 hover:text-violet-900 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Sparkles className="w-3 h-3" /> AI 生成
+                <Sparkles className="w-3 h-3" /> Generate with AI
               </button>
             </div>
             {aiState !== 'idle' && (
@@ -304,17 +304,17 @@ function NewJob({ onCancel, onCreate, callClaude }) {
                     type="text"
                     value={brief}
                     onChange={e => setBrief(e.target.value)}
-                    placeholder="简要说明，例如：5年经验的高级前端工程师，熟悉 React"
+                    placeholder="Optional: add details, e.g. 5+ years senior frontend engineer, React experience"
                     disabled={aiState === 'generating'}
                     className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent disabled:bg-slate-100"
                   />
                   <button
                     type="button"
                     onClick={handleGenerate}
-                    disabled={!brief.trim() || aiState === 'generating'}
+                    disabled={!title.trim() || aiState === 'generating'}
                     className="px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                   >
-                    {aiState === 'generating' ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 生成中...</> : '生成'}
+                    {aiState === 'generating' ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</> : 'Generate'}
                   </button>
                   <button
                     type="button"
@@ -322,7 +322,7 @@ function NewJob({ onCancel, onCreate, callClaude }) {
                     disabled={aiState === 'generating'}
                     className="px-3 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-white disabled:opacity-50"
                   >
-                    取消
+                    Cancel
                   </button>
                 </div>
                 {aiError && <p className="text-xs text-red-600">{aiError}</p>}
@@ -337,14 +337,14 @@ function NewJob({ onCancel, onCreate, callClaude }) {
                         onClick={() => { setDescription(generatedDesc); setAiState('idle'); setBrief(''); setGeneratedDesc(''); setAiError(null); }}
                         className="px-3 py-1.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800"
                       >
-                        使用此描述
+                        Use this description
                       </button>
                       <button
                         type="button"
                         onClick={() => { setAiState('input'); setGeneratedDesc(''); setAiError(null); }}
                         className="px-3 py-1.5 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-white"
                       >
-                        重新生成
+                        Regenerate
                       </button>
                     </div>
                   </div>
@@ -874,15 +874,20 @@ Be rigorous and specific. Reference concrete things from their answers.`;
 }
 
 async function generateJobDescription(title, brief, callClaude) {
-  const prompt = `你是一位专业的 HR，请根据以下信息生成一份完整的岗位描述（中文）。
+  const trimmedBrief = (brief || '').trim();
+  const briefLine = trimmedBrief
+    ? `Additional details: ${trimmedBrief}`
+    : 'Additional details: (none provided — infer reasonable defaults from the job title)';
+  const prompt = `You are a professional HR specialist. Write a complete job description based on the information below.
 
-岗位名称：${title}
-简要说明：${brief}
+Job title: ${title}
+${briefLine}
 
-要求：
-- 包含岗位职责（5-7 条）
-- 包含任职要求（5-7 条）
-- 语言专业、简洁，适合发布在招聘平台
-- 直接输出岗位描述正文，不要额外说明`;
+Requirements:
+- Include a short role overview (1-2 sentences)
+- Include Responsibilities (5-7 bullet points)
+- Include Requirements / Qualifications (5-7 bullet points)
+- Professional, concise tone suitable for a job board
+- Output only the job description body, with no extra commentary`;
   return (await callClaude(prompt)).trim();
 }
