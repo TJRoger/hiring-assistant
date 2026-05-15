@@ -205,3 +205,24 @@ describe('recordUsage', () => {
     assert.ok(usage['bot-a'].window_start);
   });
 });
+
+describe('full flow integration', () => {
+  it('enforce → record → enforce blocks on second call', () => {
+    const usage = {};
+    const req = { agent: { name: 'bot-a', weekly_input_token_limit: 100, weekly_output_token_limit: 50 } };
+    let nextCalled = false;
+    const passRes = { status: () => ({ json: () => {} }) };
+
+    enforceTokenLimit(usage, req, passRes, () => { nextCalled = true; });
+    assert.ok(nextCalled);
+
+    recordUsage(usage, 'bot-a', { input_tokens: 80, output_tokens: 30, cache_creation_input_tokens: 25, cache_read_input_tokens: 0 });
+
+    let statusCode;
+    const blockRes = { status: (code) => { statusCode = code; return { json: () => {} }; } };
+    nextCalled = false;
+    enforceTokenLimit(usage, req, blockRes, () => { nextCalled = true; });
+    assert.ok(!nextCalled);
+    assert.equal(statusCode, 429);
+  });
+});
