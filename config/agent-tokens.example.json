@@ -1,5 +1,10 @@
 {
   "tokens": [
-    { "name": "example-agent", "token": "replace-with-output-of-node-scripts-gen-agent-token-js" }
+    {
+      "name": "example-agent",
+      "token": "replace-with-output-of-node-scripts-gen-agent-token-js",
+      "weekly_input_token_limit": 2000000,
+      "weekly_output_token_limit": 500000
+    }
   ]
 }
