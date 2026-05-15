@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import session from 'express-session';
 import fs from 'fs';
-import { loadAgentTokens } from './server-lib.js';
+import { loadAgentTokens, loadUsage, saveUsage, enforceTokenLimit, recordUsage } from './server-lib.js';
 
 dotenv.config();
 
@@ -47,6 +47,9 @@ try {
   console.error('❌ Invalid config/agent-tokens.json:', e.message);
   process.exit(1);
 }
+
+const agentUsagePath = path.join(__dirname, 'config', 'agent-usage.json');
+let agentUsage = loadUsage(agentUsagePath);
 
 app.use(cors({
   origin: 'http://localhost:5173',
@@ -105,7 +108,11 @@ function requireAgentToken(req, res, next) {
     console.warn('agent auth failed');
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  req.agent = { name: matched.name };
+  req.agent = {
+    name: matched.name,
+    weekly_input_token_limit: matched.weekly_input_token_limit,
+    weekly_output_token_limit: matched.weekly_output_token_limit
+  };
   console.log(`agent=${matched.name} ${req.method} ${req.path}`);
   next();
 }
@@ -153,7 +160,7 @@ app.post('/api/claude', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/agent/claude', requireAgentToken, async (req, res) => {
+app.post('/api/agent/claude', requireAgentToken, (req, res, next) => enforceTokenLimit(agentUsage, req, res, next), async (req, res) => {
   try {
     const { messages, system, max_tokens = 16000 } = req.body;
     const response = await anthropic.messages.create({
@@ -162,6 +169,10 @@ app.post('/api/agent/claude', requireAgentToken, async (req, res) => {
       messages,
       ...(system && { system })
     });
+    if (response.usage) {
+      recordUsage(agentUsage, req.agent.name, response.usage);
+      saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+    }
     res.json(response);
   } catch (err) {
     console.error('API error:', err);
@@ -169,8 +180,7 @@ app.post('/api/agent/claude', requireAgentToken, async (req, res) => {
   }
 });
 
-// Anthropic SDK-compatible endpoint (accepts x-api-key, same path the SDK hits)
-app.post('/v1/messages', requireAgentToken, async (req, res) => {
+app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimit(agentUsage, req, res, next), async (req, res) => {
   try {
     const { messages, system, max_tokens = 16000, model, stream } = req.body;
     const response = await anthropic.messages.create({
@@ -184,11 +194,21 @@ app.post('/v1/messages', requireAgentToken, async (req, res) => {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      let lastUsage = null;
       for await (const event of response) {
         res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (event.type === 'message_delta' && event.usage) lastUsage = event.usage;
+      }
+      if (lastUsage) {
+        recordUsage(agentUsage, req.agent.name, lastUsage);
+        saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
       }
       res.end();
     } else {
+      if (response.usage) {
+        recordUsage(agentUsage, req.agent.name, response.usage);
+        saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+      }
       res.json(response);
     }
   } catch (err) {
