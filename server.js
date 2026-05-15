@@ -51,6 +51,28 @@ try {
 const agentUsagePath = path.join(__dirname, 'config', 'agent-usage.json');
 let agentUsage = loadUsage(agentUsagePath);
 
+let reloadTimer = null;
+if (fs.existsSync(agentTokensPath)) {
+  fs.watch(agentTokensPath, () => {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      try {
+        const newTokens = loadAgentTokens(agentTokensPath);
+        const oldNames = new Set(agentTokens.map(t => t.name));
+        const newNames = new Set(newTokens.map(t => t.name));
+        const added = [...newNames].filter(n => !oldNames.has(n));
+        const removed = [...oldNames].filter(n => !newNames.has(n));
+        agentTokens = newTokens;
+        if (added.length) console.log(`🔄 Agent tokens added: ${added.join(', ')}`);
+        if (removed.length) console.log(`🔄 Agent tokens removed: ${removed.join(', ')}`);
+        console.log(`🔄 Reloaded ${agentTokens.length} agent token(s)`);
+      } catch (e) {
+        console.error('🔄 Failed to reload agent-tokens.json:', e.message, '— keeping previous config');
+      }
+    }, 100);
+  });
+}
+
 app.use(cors({
   origin: 'http://localhost:5173',
   credentials: true
