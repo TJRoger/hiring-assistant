@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { loadAgentTokens, loadUsage, saveUsage, enforceTokenLimit } from '../server-lib.js';
+import { loadAgentTokens, loadUsage, saveUsage, enforceTokenLimit, recordUsage } from '../server-lib.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(__dirname, 'fixtures');
@@ -167,5 +167,41 @@ describe('enforceTokenLimit', () => {
     assert.ok(nextCalled);
     assert.equal(usage['bot-a'].input_tokens_used, 0);
     assert.equal(usage['bot-a'].output_tokens_used, 0);
+  });
+});
+
+describe('recordUsage', () => {
+  it('adds input and output tokens from response usage', () => {
+    const usage = {
+      'bot-a': { window_start: new Date().toISOString(), input_tokens_used: 100, output_tokens_used: 50 }
+    };
+    const responseUsage = {
+      input_tokens: 200,
+      output_tokens: 80,
+      cache_creation_input_tokens: 50,
+      cache_read_input_tokens: 30
+    };
+    recordUsage(usage, 'bot-a', responseUsage);
+    assert.equal(usage['bot-a'].input_tokens_used, 380);
+    assert.equal(usage['bot-a'].output_tokens_used, 130);
+  });
+
+  it('handles missing cache fields gracefully', () => {
+    const usage = {
+      'bot-a': { window_start: new Date().toISOString(), input_tokens_used: 0, output_tokens_used: 0 }
+    };
+    const responseUsage = { input_tokens: 100, output_tokens: 40 };
+    recordUsage(usage, 'bot-a', responseUsage);
+    assert.equal(usage['bot-a'].input_tokens_used, 100);
+    assert.equal(usage['bot-a'].output_tokens_used, 40);
+  });
+
+  it('initializes usage record if missing', () => {
+    const usage = {};
+    const responseUsage = { input_tokens: 100, output_tokens: 40 };
+    recordUsage(usage, 'bot-a', responseUsage);
+    assert.equal(usage['bot-a'].input_tokens_used, 100);
+    assert.equal(usage['bot-a'].output_tokens_used, 40);
+    assert.ok(usage['bot-a'].window_start);
   });
 });

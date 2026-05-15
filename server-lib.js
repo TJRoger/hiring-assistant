@@ -73,3 +73,15 @@ export function enforceTokenLimit(usage, req, res, next) {
 
   next();
 }
+
+export function recordUsage(usage, agentName, responseUsage) {
+  if (!usage[agentName]) {
+    usage[agentName] = { window_start: new Date().toISOString(), input_tokens_used: 0, output_tokens_used: 0 };
+  }
+  const record = usage[agentName];
+  const inputTotal = (responseUsage.input_tokens || 0)
+    + (responseUsage.cache_creation_input_tokens || 0)
+    + (responseUsage.cache_read_input_tokens || 0);
+  record.input_tokens_used += inputTotal;
+  record.output_tokens_used += (responseUsage.output_tokens || 0);
+}
