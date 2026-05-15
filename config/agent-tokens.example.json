@@ -1,0 +1,5 @@
+{
+  "tokens": [
+    { "name": "example-agent", "token": "replace-with-output-of-node-scripts-gen-agent-token-js" }
+  ]
+}
