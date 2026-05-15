@@ -95,10 +95,15 @@ function requireAuth(req, res, next) {
 
 function requireAgentToken(req, res, next) {
   const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) {
+  const apiKey = req.headers['x-api-key'];
+  let presented;
+  if (apiKey) {
+    presented = apiKey;
+  } else if (auth && auth.startsWith('Bearer ')) {
+    presented = auth.slice(7);
+  } else {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  const presented = auth.slice(7);
   const presentedBuf = Buffer.from(presented);
   let matched = null;
   for (const entry of agentTokens) {
@@ -169,6 +174,34 @@ app.post('/api/agent/claude', requireAgentToken, async (req, res) => {
       ...(system && { system })
     });
     res.json(response);
+  } catch (err) {
+    console.error('API error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Anthropic SDK-compatible endpoint (accepts x-api-key, same path the SDK hits)
+app.post('/v1/messages', requireAgentToken, async (req, res) => {
+  try {
+    const { messages, system, max_tokens = 16000, model, stream } = req.body;
+    const response = await anthropic.messages.create({
+      model: model || 'claude-opus-4-7',
+      max_tokens,
+      messages,
+      ...(system && { system }),
+      ...(stream && { stream })
+    });
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      for await (const event of response) {
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      }
+      res.end();
+    } else {
+      res.json(response);
+    }
   } catch (err) {
     console.error('API error:', err);
     res.status(500).json({ error: err.message });
