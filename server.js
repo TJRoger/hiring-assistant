@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import session from 'express-session';
 import fs from 'fs';
+import { loadAgentTokens } from './server-lib.js';
 
 dotenv.config();
 
@@ -33,30 +34,18 @@ if (!process.env.SESSION_SECRET) {
   process.exit(1);
 }
 
-// Load agent tokens (optional — server boots without them)
 let agentTokens = [];
 const agentTokensPath = path.join(__dirname, 'config', 'agent-tokens.json');
-if (fs.existsSync(agentTokensPath)) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(agentTokensPath, 'utf-8'));
-    if (!Array.isArray(parsed.tokens)) throw new Error('tokens must be an array');
-    const seen = new Set();
-    for (const entry of parsed.tokens) {
-      if (!entry.name || !entry.token) throw new Error('each token entry needs name and token');
-      if (seen.has(entry.token)) {
-        console.warn(`⚠️  Duplicate agent token for "${entry.name}" — keeping first occurrence`);
-        continue;
-      }
-      seen.add(entry.token);
-      agentTokens.push(entry);
-    }
+try {
+  agentTokens = loadAgentTokens(agentTokensPath);
+  if (agentTokens.length > 0) {
     console.log(`✅ Loaded ${agentTokens.length} agent token(s)`);
-  } catch (e) {
-    console.error('❌ Invalid config/agent-tokens.json:', e.message);
-    process.exit(1);
+  } else {
+    console.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
   }
-} else {
-  console.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
+} catch (e) {
+  console.error('❌ Invalid config/agent-tokens.json:', e.message);
+  process.exit(1);
 }
 
 app.use(cors({
