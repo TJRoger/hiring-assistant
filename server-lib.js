@@ -16,3 +16,19 @@ export function loadAgentTokens(filePath) {
   }
   return tokens;
 }
+
+export function loadUsage(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+export function saveUsage(filePath, usage, activeNames) {
+  const filtered = {};
+  for (const [name, data] of Object.entries(usage)) {
+    if (activeNames.has(name)) filtered[name] = data;
+  }
+  fs.writeFileSync(filePath, JSON.stringify(filtered, null, 2));
+}

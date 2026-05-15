@@ -54,3 +54,4 @@ startup.sh
 # Auth config (contains credentials)
 config/users.json
 config/agent-tokens.json
+config/agent-usage.json

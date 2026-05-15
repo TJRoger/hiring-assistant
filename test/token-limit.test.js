@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { loadAgentTokens } from '../server-lib.js';
+import { loadAgentTokens, loadUsage, saveUsage } from '../server-lib.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(__dirname, 'fixtures');
@@ -58,5 +58,54 @@ describe('loadAgentTokens', () => {
     const result = loadAgentTokens(tokensFile);
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'first');
+  });
+});
+
+describe('usage persistence', () => {
+  beforeEach(() => {
+    fs.mkdirSync(fixtureDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  });
+
+  it('loadUsage returns empty object when file missing', () => {
+    const result = loadUsage('/nonexistent/usage.json');
+    assert.deepEqual(result, {});
+  });
+
+  it('loadUsage returns parsed data from valid file', () => {
+    const usageFile = path.join(fixtureDir, 'usage.json');
+    const data = {
+      'bot-a': { window_start: '2026-05-10T00:00:00.000Z', input_tokens_used: 100, output_tokens_used: 50 }
+    };
+    fs.writeFileSync(usageFile, JSON.stringify(data));
+
+    const result = loadUsage(usageFile);
+    assert.deepEqual(result, data);
+  });
+
+  it('loadUsage returns empty object on corrupt file', () => {
+    const usageFile = path.join(fixtureDir, 'usage.json');
+    fs.writeFileSync(usageFile, 'not json{{{');
+
+    const result = loadUsage(usageFile);
+    assert.deepEqual(result, {});
+  });
+
+  it('saveUsage writes JSON and excludes orphaned agents', () => {
+    const usageFile = path.join(fixtureDir, 'usage.json');
+    const usage = {
+      'bot-a': { window_start: '2026-05-10T00:00:00.000Z', input_tokens_used: 100, output_tokens_used: 50 },
+      'removed-bot': { window_start: '2026-05-10T00:00:00.000Z', input_tokens_used: 999, output_tokens_used: 999 }
+    };
+    const activeNames = new Set(['bot-a']);
+
+    saveUsage(usageFile, usage, activeNames);
+
+    const written = JSON.parse(fs.readFileSync(usageFile, 'utf-8'));
+    assert.ok(written['bot-a']);
+    assert.equal(written['removed-bot'], undefined);
   });
 });
