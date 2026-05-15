@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import path from 'path';
@@ -30,6 +31,32 @@ try {
 if (!process.env.SESSION_SECRET) {
   console.error('❌ SESSION_SECRET not set in .env');
   process.exit(1);
+}
+
+// Load agent tokens (optional — server boots without them)
+let agentTokens = [];
+const agentTokensPath = path.join(__dirname, 'config', 'agent-tokens.json');
+if (fs.existsSync(agentTokensPath)) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(agentTokensPath, 'utf-8'));
+    if (!Array.isArray(parsed.tokens)) throw new Error('tokens must be an array');
+    const seen = new Set();
+    for (const entry of parsed.tokens) {
+      if (!entry.name || !entry.token) throw new Error('each token entry needs name and token');
+      if (seen.has(entry.token)) {
+        console.warn(`⚠️  Duplicate agent token for "${entry.name}" — keeping first occurrence`);
+        continue;
+      }
+      seen.add(entry.token);
+      agentTokens.push(entry);
+    }
+    console.log(`✅ Loaded ${agentTokens.length} agent token(s)`);
+  } catch (e) {
+    console.error('❌ Invalid config/agent-tokens.json:', e.message);
+    process.exit(1);
+  }
+} else {
+  console.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
 }
 
 app.use(cors({
@@ -66,6 +93,29 @@ function requireAuth(req, res, next) {
   next();
 }
 
+function requireAgentToken(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const presented = auth.slice(7);
+  const presentedBuf = Buffer.from(presented);
+  let matched = null;
+  for (const entry of agentTokens) {
+    const entryBuf = Buffer.from(entry.token);
+    if (presentedBuf.length === entryBuf.length && crypto.timingSafeEqual(presentedBuf, entryBuf)) {
+      matched = entry;
+    }
+  }
+  if (!matched) {
+    console.warn('agent auth failed');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  req.agent = { name: matched.name };
+  console.log(`agent=${matched.name} ${req.method} ${req.path}`);
+  next();
+}
+
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -94,6 +144,22 @@ app.get('/api/me', (req, res) => {
 });
 
 app.post('/api/claude', requireAuth, async (req, res) => {
+  try {
+    const { messages, system, max_tokens = 16000 } = req.body;
+    const response = await anthropic.messages.create({
+      model: 'claude-opus-4-7',
+      max_tokens,
+      messages,
+      ...(system && { system })
+    });
+    res.json(response);
+  } catch (err) {
+    console.error('API error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/agent/claude', requireAgentToken, async (req, res) => {
   try {
     const { messages, system, max_tokens = 16000 } = req.body;
     const response = await anthropic.messages.create({
