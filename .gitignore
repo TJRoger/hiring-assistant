@@ -55,3 +55,6 @@ startup.sh
 config/users.json
 config/agent-tokens.json
 config/agent-usage.json
+
+# Runtime usage data
+config/user-usage.json

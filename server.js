@@ -15,6 +15,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Free quota configuration
+const FREE_QUOTA_INPUT_TOKENS = parseInt(process.env.FREE_QUOTA_INPUT_TOKENS) || 100000;
+const FREE_QUOTA_OUTPUT_TOKENS = parseInt(process.env.FREE_QUOTA_OUTPUT_TOKENS) || 20000;
+
+// User usage tracking
+const userUsagePath = path.join(__dirname, 'config', 'user-usage.json');
+
+function loadUserUsage() {
+  try {
+    return JSON.parse(fs.readFileSync(userUsagePath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveUserUsage(usage) {
+  fs.writeFileSync(userUsagePath, JSON.stringify(usage, null, 2));
+}
+
+let userUsage = loadUserUsage();
+
 const usersConfigPath = path.join(__dirname, 'config', 'users.json');
 if (!fs.existsSync(usersConfigPath)) {
   console.error('❌ Missing config/users.json. Copy config/users.example.json and add your users.');
@@ -139,6 +160,43 @@ function requireAgentToken(req, res, next) {
   next();
 }
 
+function checkFreeQuota(req, res, next) {
+  // Skip quota check if user provides their own API key
+  if (req.headers['x-user-api-key']) {
+    return next();
+  }
+
+  const username = req.session.user.username;
+  if (!userUsage[username]) {
+    userUsage[username] = {
+      input_tokens_used: 0,
+      output_tokens_used: 0,
+      created_at: new Date().toISOString()
+    };
+  }
+
+  const record = userUsage[username];
+  const inputExceeded = record.input_tokens_used >= FREE_QUOTA_INPUT_TOKENS;
+  const outputExceeded = record.output_tokens_used >= FREE_QUOTA_OUTPUT_TOKENS;
+
+  if (inputExceeded || outputExceeded) {
+    return res.status(429).json({
+      error: 'Free quota exceeded. Provide your own API key via x-user-api-key header to continue.',
+      type: 'quota_exceeded',
+      quota: {
+        input: FREE_QUOTA_INPUT_TOKENS,
+        output: FREE_QUOTA_OUTPUT_TOKENS
+      },
+      used: {
+        input: record.input_tokens_used,
+        output: record.output_tokens_used
+      }
+    });
+  }
+
+  next();
+}
+
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -166,15 +224,48 @@ app.get('/api/me', (req, res) => {
   res.json(req.session.user);
 });
 
-app.post('/api/claude', requireAuth, async (req, res) => {
+app.post('/api/claude', requireAuth, checkFreeQuota, async (req, res) => {
   try {
     const { messages, system, max_tokens = 16000 } = req.body;
-    const response = await anthropic.messages.create({
+
+    // Use user-provided API key if present, otherwise use server default
+    const userApiKey = req.headers['x-user-api-key'];
+    const userBaseUrl = req.headers['x-user-base-url'];
+    const usingOwnKey = !!userApiKey;
+
+    const client = usingOwnKey
+      ? new Anthropic({
+          apiKey: userApiKey,
+          ...(userBaseUrl && { baseURL: userBaseUrl })
+        })
+      : anthropic;
+
+    const response = await client.messages.create({
       model: 'claude-opus-4-7',
       max_tokens,
       messages,
       ...(system && { system })
     });
+
+    // Record token usage if using server key
+    if (!usingOwnKey && response.usage) {
+      const username = req.session.user.username;
+      if (!userUsage[username]) {
+        userUsage[username] = {
+          input_tokens_used: 0,
+          output_tokens_used: 0,
+          created_at: new Date().toISOString()
+        };
+      }
+      const record = userUsage[username];
+      const inputTotal = (response.usage.input_tokens || 0)
+        + (response.usage.cache_creation_input_tokens || 0)
+        + (response.usage.cache_read_input_tokens || 0);
+      record.input_tokens_used += inputTotal;
+      record.output_tokens_used += (response.usage.output_tokens || 0);
+      saveUserUsage(userUsage);
+    }
+
     res.json(response);
   } catch (err) {
     console.error('API error:', err);
@@ -237,6 +328,22 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
     console.error('API error:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/usage', requireAuth, (req, res) => {
+  const username = req.session.user.username;
+  const record = userUsage[username] || {
+    input_tokens_used: 0,
+    output_tokens_used: 0,
+    created_at: null
+  };
+  res.json({
+    inputTokensUsed: record.input_tokens_used,
+    outputTokensUsed: record.output_tokens_used,
+    inputTokensQuota: FREE_QUOTA_INPUT_TOKENS,
+    outputTokensQuota: FREE_QUOTA_OUTPUT_TOKENS,
+    createdAt: record.created_at
+  });
 });
 
 // Serve built frontend in production

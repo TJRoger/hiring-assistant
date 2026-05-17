@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Briefcase, Users, Upload, FileText, CheckCircle2, XCircle, Clock, ArrowLeft, Plus, Send, Loader2, Sparkles, TrendingUp, AlertCircle, ChevronRight, User, Building2, ClipboardCheck, MessageSquare, Award, Target, X, LogOut } from 'lucide-react';
+import { Briefcase, Users, Upload, FileText, CheckCircle2, XCircle, Clock, ArrowLeft, Plus, Send, Loader2, Sparkles, TrendingUp, AlertCircle, ChevronRight, User, Building2, ClipboardCheck, MessageSquare, Award, Target, X, LogOut, Settings } from 'lucide-react';
 import LoginPage from './LoginPage.jsx';
 
 export default function HiringAssistant() {
@@ -14,6 +14,7 @@ export default function HiringAssistant() {
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -50,14 +51,24 @@ export default function HiringAssistant() {
     const body = { max_tokens: 2000, messages };
     if (systemPrompt) body.system = systemPrompt;
 
+    const headers = { 'Content-Type': 'application/json' };
+    const userApiKey = localStorage.getItem('user_api_key');
+    const userBaseUrl = localStorage.getItem('user_base_url');
+    if (userApiKey) headers['x-user-api-key'] = userApiKey;
+    if (userBaseUrl) headers['x-user-base-url'] = userBaseUrl;
+
     const response = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       credentials: 'include',
       body: JSON.stringify(body)
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
+      if (response.status === 429 && err.type === 'quota_exceeded') {
+        setShowSettings(true);
+        throw new Error('Free quota exceeded. Configure your own API key in Settings to continue.');
+      }
       throw new Error(err.error || 'API request failed');
     }
     const data = await response.json();
@@ -127,6 +138,9 @@ export default function HiringAssistant() {
             </div>
             <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
               <span className="text-sm text-slate-600">{currentUser.username}</span>
+              <button onClick={() => setShowSettings(true)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100" title="Settings">
+                <Settings className="w-4 h-4" />
+              </button>
               <button onClick={handleLogout} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100" title="Sign out">
                 <LogOut className="w-4 h-4" />
               </button>
@@ -134,6 +148,8 @@ export default function HiringAssistant() {
           </div>
         </div>
       </header>
+
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       <main className="max-w-6xl mx-auto px-6 py-8">
         {error && (
@@ -169,6 +185,143 @@ export default function HiringAssistant() {
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function SettingsModal({ onClose }) {
+  const [apiKey, setApiKey] = useState(localStorage.getItem('user_api_key') || '');
+  const [baseUrl, setBaseUrl] = useState(localStorage.getItem('user_base_url') || '');
+  const [usage, setUsage] = useState(null);
+  const [loadingUsage, setLoadingUsage] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/usage', { credentials: 'include' })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => setUsage(data))
+      .catch(() => setUsage(null))
+      .finally(() => setLoadingUsage(false));
+  }, []);
+
+  const handleSave = () => {
+    if (apiKey.trim()) {
+      localStorage.setItem('user_api_key', apiKey.trim());
+    } else {
+      localStorage.removeItem('user_api_key');
+    }
+    if (baseUrl.trim()) {
+      localStorage.setItem('user_base_url', baseUrl.trim());
+    } else {
+      localStorage.removeItem('user_base_url');
+    }
+    onClose();
+  };
+
+  const handleClear = () => {
+    localStorage.removeItem('user_api_key');
+    localStorage.removeItem('user_base_url');
+    setApiKey('');
+    setBaseUrl('');
+  };
+
+  const hasCustomKey = !!localStorage.getItem('user_api_key');
+
+  const getUsagePercent = (used, quota) => quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-200">
+          <h2 className="text-lg font-semibold text-slate-900">Settings</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-6">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <TrendingUp className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-medium text-slate-900">Usage</h3>
+            </div>
+            {loadingUsage ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading usage...
+              </div>
+            ) : usage ? (
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs text-slate-600 mb-1">
+                    <span>Input tokens</span>
+                    <span>{usage.inputTokensUsed?.toLocaleString()} / {usage.inputTokensQuota?.toLocaleString()}</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-slate-700 rounded-full transition-all" style={{ width: `${getUsagePercent(usage.inputTokensUsed, usage.inputTokensQuota)}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs text-slate-600 mb-1">
+                    <span>Output tokens</span>
+                    <span>{usage.outputTokensUsed?.toLocaleString()} / {usage.outputTokensQuota?.toLocaleString()}</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-slate-700 rounded-full transition-all" style={{ width: `${getUsagePercent(usage.outputTokensUsed, usage.outputTokensQuota)}%` }} />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Unable to load usage data.</p>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-sm font-medium text-slate-900">Status</h3>
+            </div>
+            {hasCustomKey ? (
+              <p className="text-sm text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-md">Using your own API key</p>
+            ) : usage ? (
+              <p className="text-sm text-slate-700 bg-slate-50 px-3 py-1.5 rounded-md">
+                Using free quota ({Math.max(0, 100 - getUsagePercent(usage.inputTokensUsed, usage.inputTokensQuota))}% remaining)
+              </p>
+            ) : (
+              <p className="text-sm text-slate-500 bg-slate-50 px-3 py-1.5 rounded-md">Using free quota</p>
+            )}
+          </div>
+
+          <div>
+            <h3 className="text-sm font-medium text-slate-900 mb-3">Your API Key</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="sk-ant-..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Base URL (optional)</label>
+                <input
+                  type="text"
+                  value={baseUrl}
+                  onChange={e => setBaseUrl(e.target.value)}
+                  placeholder="https://api.anthropic.com"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between p-5 border-t border-slate-200">
+          <button onClick={handleClear} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md">
+            Clear
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50">Cancel</button>
+            <button onClick={handleSave} className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800">Save</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
