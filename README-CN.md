@@ -17,6 +17,7 @@
 
   ▎ GitHub 地址：AI Hiring Assistant
 
+作者域账号：cyluo4（iFLYTEK 企业数字化）
   ---
   它能做什么？
 
