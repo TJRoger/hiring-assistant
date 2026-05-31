@@ -17,33 +17,44 @@ Two gaps in the current server:
 
 ---
 
-## 1. Token Tracking for Own-Key Users
+## 1. Token Tracking for Users
 
-### What changes
+### Data shape (both files)
 
-In `server.js`, the `/api/claude` handler currently skips usage recording when `usingOwnKey` is true. We add a parallel recording path:
-
-- Load/save from `config/user-usage-own-key.json` (same JSON shape as `user-usage.json`)
-- Record `input_tokens_used`, `output_tokens_used`, `created_at` per username
-- No quota enforcement — purely informational
-
-### Data shape
+Both `config/user-usage.json` (server key) and `config/user-usage-own-key.json` (own key) use the same structure:
 
 ```json
 {
   "alice": {
-    "input_tokens_used": 42000,
-    "output_tokens_used": 8000,
+    "week_start": "2026-05-26T00:00:00.000Z",
+    "week_input_tokens": 12000,
+    "week_output_tokens": 3000,
+    "total_input_tokens": 42000,
+    "total_output_tokens": 8000,
     "created_at": "2026-05-31T10:00:00.000Z"
   }
 }
 ```
 
-### Implementation
+- `week_start` / `week_input_tokens` / `week_output_tokens`: current 7-day window, reset when `now - week_start >= 7 days`
+- `total_input_tokens` / `total_output_tokens`: lifetime cumulative, never reset
+- `created_at`: first-seen timestamp
 
-- Add `userOwnKeyUsagePath` and `userOwnKeyUsage` alongside the existing `userUsage` variables
-- Reuse the same `loadUserUsage` / `saveUserUsage` pattern, passing the new path
+### What changes
+
+**`user-usage.json` (server key users):**
+- Existing records migrated to new shape on first write (old fields `input_tokens_used` / `output_tokens_used` become `total_*` and seed the first `week_*` values)
+- `checkFreeQuota` uses `week_input_tokens` / `week_output_tokens` for quota enforcement (resets weekly)
+- Recording after response updates both `week_*` and `total_*`
+
+**`user-usage-own-key.json` (own key users):**
+- New file, same shape, no quota enforcement — purely informational
+- Add `userOwnKeyUsagePath` and `userOwnKeyUsage` alongside existing `userUsage` variables
 - In the `usingOwnKey` branch of `/api/claude`, record usage after a successful response
+
+### Helper: `updateUserUsage(record, usage)`
+
+Extracted helper in `server.js` that handles both weekly reset and cumulative accumulation, used by both tracking paths.
 
 ---
 
