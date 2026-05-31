@@ -31,7 +31,8 @@ Both `config/user-usage.json` (server key) and `config/user-usage-own-key.json` 
     "week_output_tokens": 3000,
     "total_input_tokens": 42000,
     "total_output_tokens": 8000,
-    "created_at": "2026-05-31T10:00:00.000Z"
+    "created_at": "2026-05-31T10:00:00.000Z",
+    "updated_at": "2026-05-31T12:34:56.000Z"
   }
 }
 ```
@@ -39,6 +40,7 @@ Both `config/user-usage.json` (server key) and `config/user-usage-own-key.json` 
 - `week_start` / `week_input_tokens` / `week_output_tokens`: current 7-day window, reset when `now - week_start >= 7 days`
 - `total_input_tokens` / `total_output_tokens`: lifetime cumulative, never reset
 - `created_at`: first-seen timestamp
+- `updated_at`: last write timestamp
 
 ### What changes
 
