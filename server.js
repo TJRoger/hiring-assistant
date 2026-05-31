@@ -378,17 +378,25 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      let startUsage = null;
       let lastUsage = null;
       for await (const event of response) {
         res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (event.type === 'message_start' && event.message?.usage) startUsage = event.message.usage;
         if (event.type === 'message_delta' && event.usage) lastUsage = event.usage;
       }
-      if (lastUsage) {
-        recordUsage(agentUsage, req.agent.name, lastUsage);
+      if (lastUsage || startUsage) {
+        const mergedUsage = {
+          input_tokens: startUsage?.input_tokens || 0,
+          cache_creation_input_tokens: startUsage?.cache_creation_input_tokens || 0,
+          cache_read_input_tokens: startUsage?.cache_read_input_tokens || 0,
+          output_tokens: lastUsage?.output_tokens || 0,
+        };
+        recordUsage(agentUsage, req.agent.name, mergedUsage);
         saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
         res.locals.usage = {
-          input: (lastUsage.input_tokens || 0) + (lastUsage.cache_creation_input_tokens || 0) + (lastUsage.cache_read_input_tokens || 0),
-          output: lastUsage.output_tokens || 0,
+          input: (mergedUsage.input_tokens) + (mergedUsage.cache_creation_input_tokens) + (mergedUsage.cache_read_input_tokens),
+          output: mergedUsage.output_tokens,
         };
       }
       res.end();
