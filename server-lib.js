@@ -1,4 +1,5 @@
 import fs from 'fs';
+import logger from './logger.js';
 
 export function loadAgentTokens(filePath) {
   if (!fs.existsSync(filePath)) {

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import session from 'express-session';
 import fs from 'fs';
 import { loadAgentTokens, loadUsage, saveUsage, enforceTokenLimit, recordUsage } from './server-lib.js';
+import logger from './logger.js';
 
 dotenv.config();
 
@@ -21,24 +22,48 @@ const FREE_QUOTA_OUTPUT_TOKENS = parseInt(process.env.FREE_QUOTA_OUTPUT_TOKENS) 
 
 // User usage tracking
 const userUsagePath = path.join(__dirname, 'config', 'user-usage.json');
+const userOwnKeyUsagePath = path.join(__dirname, 'config', 'user-usage-own-key.json');
 
-function loadUserUsage() {
+function loadUserUsage(filePath) {
   try {
-    return JSON.parse(fs.readFileSync(userUsagePath, 'utf-8'));
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
   } catch {
     return {};
   }
 }
 
-function saveUserUsage(usage) {
-  fs.writeFileSync(userUsagePath, JSON.stringify(usage, null, 2));
+function saveUserUsage(filePath, usage) {
+  fs.writeFileSync(filePath, JSON.stringify(usage, null, 2));
 }
 
-let userUsage = loadUserUsage();
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function updateUserUsage(record, responseUsage) {
+  const now = new Date();
+  const inputDelta = (responseUsage.input_tokens || 0)
+    + (responseUsage.cache_creation_input_tokens || 0)
+    + (responseUsage.cache_read_input_tokens || 0);
+  const outputDelta = responseUsage.output_tokens || 0;
+
+  if (!record.week_start || now.getTime() - new Date(record.week_start).getTime() >= WEEK_MS) {
+    record.week_start = now.toISOString();
+    record.week_input_tokens = 0;
+    record.week_output_tokens = 0;
+  }
+
+  record.week_input_tokens = (record.week_input_tokens || 0) + inputDelta;
+  record.week_output_tokens = (record.week_output_tokens || 0) + outputDelta;
+  record.total_input_tokens = (record.total_input_tokens || 0) + inputDelta;
+  record.total_output_tokens = (record.total_output_tokens || 0) + outputDelta;
+  record.updated_at = now.toISOString();
+}
+
+let userUsage = loadUserUsage(userUsagePath);
+let userOwnKeyUsage = loadUserUsage(userOwnKeyUsagePath);
 
 const usersConfigPath = path.join(__dirname, 'config', 'users.json');
 if (!fs.existsSync(usersConfigPath)) {
-  console.error('❌ Missing config/users.json. Copy config/users.example.json and add your users.');
+  logger.error('❌ Missing config/users.json. Copy config/users.example.json and add your users.');
   process.exit(1);
 }
 
@@ -46,12 +71,12 @@ let users;
 try {
   users = JSON.parse(fs.readFileSync(usersConfigPath, 'utf-8')).users;
 } catch (e) {
-  console.error('❌ Invalid config/users.json:', e.message);
+  logger.error(`❌ Invalid config/users.json: ${e.message}`);
   process.exit(1);
 }
 
 if (!process.env.SESSION_SECRET) {
-  console.error('❌ SESSION_SECRET not set in .env');
+  logger.error('❌ SESSION_SECRET not set in .env');
   process.exit(1);
 }
 
@@ -60,12 +85,12 @@ const agentTokensPath = path.join(__dirname, 'config', 'agent-tokens.json');
 try {
   agentTokens = loadAgentTokens(agentTokensPath);
   if (agentTokens.length > 0) {
-    console.log(`✅ Loaded ${agentTokens.length} agent token(s)`);
+    logger.info(`✅ Loaded ${agentTokens.length} agent token(s)`);
   } else {
-    console.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
+    logger.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
   }
 } catch (e) {
-  console.error('❌ Invalid config/agent-tokens.json:', e.message);
+  logger.error(`❌ Invalid config/agent-tokens.json: ${e.message}`);
   process.exit(1);
 }
 
@@ -84,11 +109,11 @@ if (fs.existsSync(agentTokensPath)) {
         const added = [...newNames].filter(n => !oldNames.has(n));
         const removed = [...oldNames].filter(n => !newNames.has(n));
         agentTokens = newTokens;
-        if (added.length) console.log(`🔄 Agent tokens added: ${added.join(', ')}`);
-        if (removed.length) console.log(`🔄 Agent tokens removed: ${removed.join(', ')}`);
-        console.log(`🔄 Reloaded ${agentTokens.length} agent token(s)`);
+        if (added.length) logger.info(`🔄 Agent tokens added: ${added.join(', ')}`);
+        if (removed.length) logger.info(`🔄 Agent tokens removed: ${removed.join(', ')}`);
+        logger.info(`🔄 Reloaded ${agentTokens.length} agent token(s)`);
       } catch (e) {
-        console.error('🔄 Failed to reload agent-tokens.json:', e.message, '— keeping previous config');
+        logger.error(`🔄 Failed to reload agent-tokens.json: ${e.message} — keeping previous config`);
       }
     }, 100);
   });
@@ -113,7 +138,7 @@ app.use(session({
 }));
 
 if (!process.env.ANTHROPIC_AUTH_TOKEN) {
-  console.warn('⚠️  Warning: ANTHROPIC_AUTH_TOKEN not set. Copy .env.example to .env and add your key.');
+logger.warn('⚠️  Warning: ANTHROPIC_AUTH_TOKEN not set. Copy .env.example to .env and add your key.');
 }
 
 const anthropic = new Anthropic({
@@ -148,7 +173,7 @@ function requireAgentToken(req, res, next) {
     }
   }
   if (!matched) {
-    console.warn('agent auth failed');
+    logger.warn('agent auth failed');
     return res.status(401).json({ error: 'Unauthorized' });
   }
   req.agent = {
@@ -156,46 +181,65 @@ function requireAgentToken(req, res, next) {
     weekly_input_token_limit: matched.weekly_input_token_limit,
     weekly_output_token_limit: matched.weekly_output_token_limit
   };
-  console.log(`agent=${matched.name} ${req.method} ${req.path}`);
+  logger.info(`agent=${matched.name} ${req.method} ${req.path}`);
   next();
 }
 
 function checkFreeQuota(req, res, next) {
-  // Skip quota check if user provides their own API key
-  if (req.headers['x-user-api-key']) {
-    return next();
-  }
+  if (req.headers['x-user-api-key']) return next();
 
   const username = req.session.user.username;
   if (!userUsage[username]) {
     userUsage[username] = {
-      input_tokens_used: 0,
-      output_tokens_used: 0,
-      created_at: new Date().toISOString()
+      week_start: new Date().toISOString(),
+      week_input_tokens: 0,
+      week_output_tokens: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
   }
 
   const record = userUsage[username];
-  const inputExceeded = record.input_tokens_used >= FREE_QUOTA_INPUT_TOKENS;
-  const outputExceeded = record.output_tokens_used >= FREE_QUOTA_OUTPUT_TOKENS;
+
+  if (Date.now() - new Date(record.week_start).getTime() >= WEEK_MS) {
+    record.week_start = new Date().toISOString();
+    record.week_input_tokens = 0;
+    record.week_output_tokens = 0;
+  }
+
+  const inputExceeded = record.week_input_tokens >= FREE_QUOTA_INPUT_TOKENS;
+  const outputExceeded = record.week_output_tokens >= FREE_QUOTA_OUTPUT_TOKENS;
 
   if (inputExceeded || outputExceeded) {
     return res.status(429).json({
       error: 'Free quota exceeded. Provide your own API key via x-user-api-key header to continue.',
       type: 'quota_exceeded',
-      quota: {
-        input: FREE_QUOTA_INPUT_TOKENS,
-        output: FREE_QUOTA_OUTPUT_TOKENS
-      },
-      used: {
-        input: record.input_tokens_used,
-        output: record.output_tokens_used
-      }
+      quota: { input: FREE_QUOTA_INPUT_TOKENS, output: FREE_QUOTA_OUTPUT_TOKENS },
+      used: { input: record.week_input_tokens, output: record.week_output_tokens },
     });
   }
 
   next();
 }
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const who = req.agent
+      ? `agent=${req.agent.name}`
+      : req.session?.user
+        ? `user=${req.session.user.username}`
+        : 'unauthenticated';
+    const tokens = res.locals.usage
+      ? ` input=${res.locals.usage.input} output=${res.locals.usage.output}`
+      : '';
+    logger.info(`[REQUEST] ${req.method} ${req.path} ${who} status=${res.statusCode} duration=${duration}ms${tokens}`);
+  });
+  next();
+});
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -247,28 +291,49 @@ app.post('/api/claude', requireAuth, checkFreeQuota, async (req, res) => {
       ...(system && { system })
     });
 
-    // Record token usage if using server key
-    if (!usingOwnKey && response.usage) {
+    // Record token usage
+    if (response.usage) {
       const username = req.session.user.username;
-      if (!userUsage[username]) {
-        userUsage[username] = {
-          input_tokens_used: 0,
-          output_tokens_used: 0,
-          created_at: new Date().toISOString()
-        };
+      if (usingOwnKey) {
+        if (!userOwnKeyUsage[username]) {
+          userOwnKeyUsage[username] = {
+            week_start: new Date().toISOString(),
+            week_input_tokens: 0,
+            week_output_tokens: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        updateUserUsage(userOwnKeyUsage[username], response.usage);
+        saveUserUsage(userOwnKeyUsagePath, userOwnKeyUsage);
+      } else {
+        if (!userUsage[username]) {
+          userUsage[username] = {
+            week_start: new Date().toISOString(),
+            week_input_tokens: 0,
+            week_output_tokens: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        updateUserUsage(userUsage[username], response.usage);
+        saveUserUsage(userUsagePath, userUsage);
       }
-      const record = userUsage[username];
+    }
+
+    if (response.usage) {
       const inputTotal = (response.usage.input_tokens || 0)
         + (response.usage.cache_creation_input_tokens || 0)
         + (response.usage.cache_read_input_tokens || 0);
-      record.input_tokens_used += inputTotal;
-      record.output_tokens_used += (response.usage.output_tokens || 0);
-      saveUserUsage(userUsage);
+      res.locals.usage = { input: inputTotal, output: response.usage.output_tokens || 0 };
     }
-
     res.json(response);
   } catch (err) {
-    console.error('API error:', err);
+    logger.error(`API error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -286,9 +351,15 @@ app.post('/api/agent/claude', requireAgentToken, (req, res, next) => enforceToke
       recordUsage(agentUsage, req.agent.name, response.usage);
       saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
     }
+    if (response.usage) {
+      const inputTotal = (response.usage.input_tokens || 0)
+        + (response.usage.cache_creation_input_tokens || 0)
+        + (response.usage.cache_read_input_tokens || 0);
+      res.locals.usage = { input: inputTotal, output: response.usage.output_tokens || 0 };
+    }
     res.json(response);
   } catch (err) {
-    console.error('API error:', err);
+    logger.error(`API error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -307,14 +378,26 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      let startUsage = null;
       let lastUsage = null;
       for await (const event of response) {
         res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (event.type === 'message_start' && event.message?.usage) startUsage = event.message.usage;
         if (event.type === 'message_delta' && event.usage) lastUsage = event.usage;
       }
-      if (lastUsage) {
-        recordUsage(agentUsage, req.agent.name, lastUsage);
+      if (lastUsage || startUsage) {
+        const mergedUsage = {
+          input_tokens: startUsage?.input_tokens || 0,
+          cache_creation_input_tokens: startUsage?.cache_creation_input_tokens || 0,
+          cache_read_input_tokens: startUsage?.cache_read_input_tokens || 0,
+          output_tokens: lastUsage?.output_tokens || 0,
+        };
+        recordUsage(agentUsage, req.agent.name, mergedUsage);
         saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+        res.locals.usage = {
+          input: (mergedUsage.input_tokens) + (mergedUsage.cache_creation_input_tokens) + (mergedUsage.cache_read_input_tokens),
+          output: mergedUsage.output_tokens,
+        };
       }
       res.end();
     } else {
@@ -322,10 +405,16 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
         recordUsage(agentUsage, req.agent.name, response.usage);
         saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
       }
+      if (response.usage) {
+        const inputTotal = (response.usage.input_tokens || 0)
+          + (response.usage.cache_creation_input_tokens || 0)
+          + (response.usage.cache_read_input_tokens || 0);
+        res.locals.usage = { input: inputTotal, output: response.usage.output_tokens || 0 };
+      }
       res.json(response);
     }
   } catch (err) {
-    console.error('API error:', err);
+    logger.error(`API error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -333,16 +422,22 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
 app.get('/api/usage', requireAuth, (req, res) => {
   const username = req.session.user.username;
   const record = userUsage[username] || {
-    input_tokens_used: 0,
-    output_tokens_used: 0,
-    created_at: null
+    week_input_tokens: 0,
+    week_output_tokens: 0,
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    created_at: null,
+    updated_at: null,
   };
   res.json({
-    inputTokensUsed: record.input_tokens_used,
-    outputTokensUsed: record.output_tokens_used,
+    weekInputTokens: record.week_input_tokens,
+    weekOutputTokens: record.week_output_tokens,
+    totalInputTokens: record.total_input_tokens,
+    totalOutputTokens: record.total_output_tokens,
     inputTokensQuota: FREE_QUOTA_INPUT_TOKENS,
     outputTokensQuota: FREE_QUOTA_OUTPUT_TOKENS,
-    createdAt: record.created_at
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
   });
 });
 
@@ -353,5 +448,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+logger.info(`✅ Server running on http://localhost:${PORT}`);
 });

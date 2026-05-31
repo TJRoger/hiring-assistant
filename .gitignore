@@ -58,3 +58,6 @@ config/agent-usage.json
 
 # Runtime usage data
 config/user-usage.json
+
+# Application logs
+logs/
