@@ -1,17 +1,64 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import session from 'express-session';
 import fs from 'fs';
+import { loadAgentTokens, loadUsage, saveUsage, enforceTokenLimit, recordUsage } from './server-lib.js';
 
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Free quota configuration
+const FREE_QUOTA_INPUT_TOKENS = parseInt(process.env.FREE_QUOTA_INPUT_TOKENS) || 100000;
+const FREE_QUOTA_OUTPUT_TOKENS = parseInt(process.env.FREE_QUOTA_OUTPUT_TOKENS) || 20000;
+
+// User usage tracking
+const userUsagePath = path.join(__dirname, 'config', 'user-usage.json');
+const userOwnKeyUsagePath = path.join(__dirname, 'config', 'user-usage-own-key.json');
+
+function loadUserUsage(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveUserUsage(filePath, usage) {
+  fs.writeFileSync(filePath, JSON.stringify(usage, null, 2));
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function updateUserUsage(record, responseUsage) {
+  const now = new Date();
+  const inputDelta = (responseUsage.input_tokens || 0)
+    + (responseUsage.cache_creation_input_tokens || 0)
+    + (responseUsage.cache_read_input_tokens || 0);
+  const outputDelta = responseUsage.output_tokens || 0;
+
+  if (!record.week_start || now.getTime() - new Date(record.week_start).getTime() >= WEEK_MS) {
+    record.week_start = now.toISOString();
+    record.week_input_tokens = 0;
+    record.week_output_tokens = 0;
+  }
+
+  record.week_input_tokens = (record.week_input_tokens || 0) + inputDelta;
+  record.week_output_tokens = (record.week_output_tokens || 0) + outputDelta;
+  record.total_input_tokens = (record.total_input_tokens || 0) + inputDelta;
+  record.total_output_tokens = (record.total_output_tokens || 0) + outputDelta;
+  record.updated_at = now.toISOString();
+}
+
+let userUsage = loadUserUsage(userUsagePath);
+let userOwnKeyUsage = loadUserUsage(userOwnKeyUsagePath);
 
 const usersConfigPath = path.join(__dirname, 'config', 'users.json');
 if (!fs.existsSync(usersConfigPath)) {
@@ -30,6 +77,45 @@ try {
 if (!process.env.SESSION_SECRET) {
   console.error('❌ SESSION_SECRET not set in .env');
   process.exit(1);
+}
+
+let agentTokens = [];
+const agentTokensPath = path.join(__dirname, 'config', 'agent-tokens.json');
+try {
+  agentTokens = loadAgentTokens(agentTokensPath);
+  if (agentTokens.length > 0) {
+    console.log(`✅ Loaded ${agentTokens.length} agent token(s)`);
+  } else {
+    console.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
+  }
+} catch (e) {
+  console.error('❌ Invalid config/agent-tokens.json:', e.message);
+  process.exit(1);
+}
+
+const agentUsagePath = path.join(__dirname, 'config', 'agent-usage.json');
+let agentUsage = loadUsage(agentUsagePath);
+
+let reloadTimer = null;
+if (fs.existsSync(agentTokensPath)) {
+  fs.watch(agentTokensPath, () => {
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      try {
+        const newTokens = loadAgentTokens(agentTokensPath);
+        const oldNames = new Set(agentTokens.map(t => t.name));
+        const newNames = new Set(newTokens.map(t => t.name));
+        const added = [...newNames].filter(n => !oldNames.has(n));
+        const removed = [...oldNames].filter(n => !newNames.has(n));
+        agentTokens = newTokens;
+        if (added.length) console.log(`🔄 Agent tokens added: ${added.join(', ')}`);
+        if (removed.length) console.log(`🔄 Agent tokens removed: ${removed.join(', ')}`);
+        console.log(`🔄 Reloaded ${agentTokens.length} agent token(s)`);
+      } catch (e) {
+        console.error('🔄 Failed to reload agent-tokens.json:', e.message, '— keeping previous config');
+      }
+    }, 100);
+  });
 }
 
 app.use(cors({
@@ -66,6 +152,77 @@ function requireAuth(req, res, next) {
   next();
 }
 
+function requireAgentToken(req, res, next) {
+  const auth = req.headers.authorization;
+  const apiKey = req.headers['x-api-key'];
+  let presented;
+  if (apiKey) {
+    presented = apiKey;
+  } else if (auth && auth.startsWith('Bearer ')) {
+    presented = auth.slice(7);
+  } else {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const presentedBuf = Buffer.from(presented);
+  let matched = null;
+  for (const entry of agentTokens) {
+    const entryBuf = Buffer.from(entry.token);
+    if (presentedBuf.length === entryBuf.length && crypto.timingSafeEqual(presentedBuf, entryBuf)) {
+      matched = entry;
+    }
+  }
+  if (!matched) {
+    console.warn('agent auth failed');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  req.agent = {
+    name: matched.name,
+    weekly_input_token_limit: matched.weekly_input_token_limit,
+    weekly_output_token_limit: matched.weekly_output_token_limit
+  };
+  console.log(`agent=${matched.name} ${req.method} ${req.path}`);
+  next();
+}
+
+function checkFreeQuota(req, res, next) {
+  if (req.headers['x-user-api-key']) return next();
+
+  const username = req.session.user.username;
+  if (!userUsage[username]) {
+    userUsage[username] = {
+      week_start: new Date().toISOString(),
+      week_input_tokens: 0,
+      week_output_tokens: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  const record = userUsage[username];
+
+  if (Date.now() - new Date(record.week_start).getTime() >= WEEK_MS) {
+    record.week_start = new Date().toISOString();
+    record.week_input_tokens = 0;
+    record.week_output_tokens = 0;
+  }
+
+  const inputExceeded = record.week_input_tokens >= FREE_QUOTA_INPUT_TOKENS;
+  const outputExceeded = record.week_output_tokens >= FREE_QUOTA_OUTPUT_TOKENS;
+
+  if (inputExceeded || outputExceeded) {
+    return res.status(429).json({
+      error: 'Free quota exceeded. Provide your own API key via x-user-api-key header to continue.',
+      type: 'quota_exceeded',
+      quota: { input: FREE_QUOTA_INPUT_TOKENS, output: FREE_QUOTA_OUTPUT_TOKENS },
+      used: { input: record.week_input_tokens, output: record.week_output_tokens },
+    });
+  }
+
+  next();
+}
+
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -93,7 +250,71 @@ app.get('/api/me', (req, res) => {
   res.json(req.session.user);
 });
 
-app.post('/api/claude', requireAuth, async (req, res) => {
+app.post('/api/claude', requireAuth, checkFreeQuota, async (req, res) => {
+  try {
+    const { messages, system, max_tokens = 16000 } = req.body;
+
+    // Use user-provided API key if present, otherwise use server default
+    const userApiKey = req.headers['x-user-api-key'];
+    const userBaseUrl = req.headers['x-user-base-url'];
+    const usingOwnKey = !!userApiKey;
+
+    const client = usingOwnKey
+      ? new Anthropic({
+          apiKey: userApiKey,
+          ...(userBaseUrl && { baseURL: userBaseUrl })
+        })
+      : anthropic;
+
+    const response = await client.messages.create({
+      model: 'claude-opus-4-7',
+      max_tokens,
+      messages,
+      ...(system && { system })
+    });
+
+    // Record token usage
+    if (response.usage) {
+      const username = req.session.user.username;
+      if (usingOwnKey) {
+        if (!userOwnKeyUsage[username]) {
+          userOwnKeyUsage[username] = {
+            week_start: new Date().toISOString(),
+            week_input_tokens: 0,
+            week_output_tokens: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        updateUserUsage(userOwnKeyUsage[username], response.usage);
+        saveUserUsage(userOwnKeyUsagePath, userOwnKeyUsage);
+      } else {
+        if (!userUsage[username]) {
+          userUsage[username] = {
+            week_start: new Date().toISOString(),
+            week_input_tokens: 0,
+            week_output_tokens: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        updateUserUsage(userUsage[username], response.usage);
+        saveUserUsage(userUsagePath, userUsage);
+      }
+    }
+
+    res.json(response);
+  } catch (err) {
+    console.error('API error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/agent/claude', requireAgentToken, (req, res, next) => enforceTokenLimit(agentUsage, req, res, next), async (req, res) => {
   try {
     const { messages, system, max_tokens = 16000 } = req.body;
     const response = await anthropic.messages.create({
@@ -102,11 +323,74 @@ app.post('/api/claude', requireAuth, async (req, res) => {
       messages,
       ...(system && { system })
     });
+    if (response.usage) {
+      recordUsage(agentUsage, req.agent.name, response.usage);
+      saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+    }
     res.json(response);
   } catch (err) {
     console.error('API error:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimit(agentUsage, req, res, next), async (req, res) => {
+  try {
+    const { messages, system, max_tokens = 16000, model, stream } = req.body;
+    const response = await anthropic.messages.create({
+      model: model || 'claude-opus-4-7',
+      max_tokens,
+      messages,
+      ...(system && { system }),
+      ...(stream && { stream })
+    });
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      let lastUsage = null;
+      for await (const event of response) {
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (event.type === 'message_delta' && event.usage) lastUsage = event.usage;
+      }
+      if (lastUsage) {
+        recordUsage(agentUsage, req.agent.name, lastUsage);
+        saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+      }
+      res.end();
+    } else {
+      if (response.usage) {
+        recordUsage(agentUsage, req.agent.name, response.usage);
+        saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+      }
+      res.json(response);
+    }
+  } catch (err) {
+    console.error('API error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/usage', requireAuth, (req, res) => {
+  const username = req.session.user.username;
+  const record = userUsage[username] || {
+    week_input_tokens: 0,
+    week_output_tokens: 0,
+    total_input_tokens: 0,
+    total_output_tokens: 0,
+    created_at: null,
+    updated_at: null,
+  };
+  res.json({
+    weekInputTokens: record.week_input_tokens,
+    weekOutputTokens: record.week_output_tokens,
+    totalInputTokens: record.total_input_tokens,
+    totalOutputTokens: record.total_output_tokens,
+    inputTokensQuota: FREE_QUOTA_INPUT_TOKENS,
+    outputTokensQuota: FREE_QUOTA_OUTPUT_TOKENS,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  });
 });
 
 // Serve built frontend in production
