@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import session from 'express-session';
 import fs from 'fs';
 import { loadAgentTokens, loadUsage, saveUsage, enforceTokenLimit, recordUsage } from './server-lib.js';
+import logger from './logger.js';
 
 dotenv.config();
 
@@ -62,7 +63,7 @@ let userOwnKeyUsage = loadUserUsage(userOwnKeyUsagePath);
 
 const usersConfigPath = path.join(__dirname, 'config', 'users.json');
 if (!fs.existsSync(usersConfigPath)) {
-  console.error('❌ Missing config/users.json. Copy config/users.example.json and add your users.');
+  logger.error('❌ Missing config/users.json. Copy config/users.example.json and add your users.');
   process.exit(1);
 }
 
@@ -70,12 +71,12 @@ let users;
 try {
   users = JSON.parse(fs.readFileSync(usersConfigPath, 'utf-8')).users;
 } catch (e) {
-  console.error('❌ Invalid config/users.json:', e.message);
+  logger.error(`❌ Invalid config/users.json: ${e.message}`);
   process.exit(1);
 }
 
 if (!process.env.SESSION_SECRET) {
-  console.error('❌ SESSION_SECRET not set in .env');
+  logger.error('❌ SESSION_SECRET not set in .env');
   process.exit(1);
 }
 
@@ -84,12 +85,12 @@ const agentTokensPath = path.join(__dirname, 'config', 'agent-tokens.json');
 try {
   agentTokens = loadAgentTokens(agentTokensPath);
   if (agentTokens.length > 0) {
-    console.log(`✅ Loaded ${agentTokens.length} agent token(s)`);
+    logger.info(`✅ Loaded ${agentTokens.length} agent token(s)`);
   } else {
-    console.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
+    logger.warn('⚠️  config/agent-tokens.json not found; /api/agent/* will reject all requests');
   }
 } catch (e) {
-  console.error('❌ Invalid config/agent-tokens.json:', e.message);
+  logger.error(`❌ Invalid config/agent-tokens.json: ${e.message}`);
   process.exit(1);
 }
 
@@ -108,11 +109,11 @@ if (fs.existsSync(agentTokensPath)) {
         const added = [...newNames].filter(n => !oldNames.has(n));
         const removed = [...oldNames].filter(n => !newNames.has(n));
         agentTokens = newTokens;
-        if (added.length) console.log(`🔄 Agent tokens added: ${added.join(', ')}`);
-        if (removed.length) console.log(`🔄 Agent tokens removed: ${removed.join(', ')}`);
-        console.log(`🔄 Reloaded ${agentTokens.length} agent token(s)`);
+        if (added.length) logger.info(`🔄 Agent tokens added: ${added.join(', ')}`);
+        if (removed.length) logger.info(`🔄 Agent tokens removed: ${removed.join(', ')}`);
+        logger.info(`🔄 Reloaded ${agentTokens.length} agent token(s)`);
       } catch (e) {
-        console.error('🔄 Failed to reload agent-tokens.json:', e.message, '— keeping previous config');
+        logger.error(`🔄 Failed to reload agent-tokens.json: ${e.message} — keeping previous config`);
       }
     }, 100);
   });
@@ -137,7 +138,7 @@ app.use(session({
 }));
 
 if (!process.env.ANTHROPIC_AUTH_TOKEN) {
-  console.warn('⚠️  Warning: ANTHROPIC_AUTH_TOKEN not set. Copy .env.example to .env and add your key.');
+logger.warn('⚠️  Warning: ANTHROPIC_AUTH_TOKEN not set. Copy .env.example to .env and add your key.');
 }
 
 const anthropic = new Anthropic({
@@ -172,7 +173,7 @@ function requireAgentToken(req, res, next) {
     }
   }
   if (!matched) {
-    console.warn('agent auth failed');
+    logger.warn('agent auth failed');
     return res.status(401).json({ error: 'Unauthorized' });
   }
   req.agent = {
@@ -180,7 +181,7 @@ function requireAgentToken(req, res, next) {
     weekly_input_token_limit: matched.weekly_input_token_limit,
     weekly_output_token_limit: matched.weekly_output_token_limit
   };
-  console.log(`agent=${matched.name} ${req.method} ${req.path}`);
+  logger.info(`agent=${matched.name} ${req.method} ${req.path}`);
   next();
 }
 
@@ -222,6 +223,23 @@ function checkFreeQuota(req, res, next) {
 
   next();
 }
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const who = req.agent
+      ? `agent=${req.agent.name}`
+      : req.session?.user
+        ? `user=${req.session.user.username}`
+        : 'unauthenticated';
+    const tokens = res.locals.usage
+      ? ` input=${res.locals.usage.input} output=${res.locals.usage.output}`
+      : '';
+    logger.info(`[REQUEST] ${req.method} ${req.path} ${who} status=${res.statusCode} duration=${duration}ms${tokens}`);
+  });
+  next();
+});
 
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -307,9 +325,15 @@ app.post('/api/claude', requireAuth, checkFreeQuota, async (req, res) => {
       }
     }
 
+    if (response.usage) {
+      const inputTotal = (response.usage.input_tokens || 0)
+        + (response.usage.cache_creation_input_tokens || 0)
+        + (response.usage.cache_read_input_tokens || 0);
+      res.locals.usage = { input: inputTotal, output: response.usage.output_tokens || 0 };
+    }
     res.json(response);
   } catch (err) {
-    console.error('API error:', err);
+    logger.error(`API error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -327,9 +351,15 @@ app.post('/api/agent/claude', requireAgentToken, (req, res, next) => enforceToke
       recordUsage(agentUsage, req.agent.name, response.usage);
       saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
     }
+    if (response.usage) {
+      const inputTotal = (response.usage.input_tokens || 0)
+        + (response.usage.cache_creation_input_tokens || 0)
+        + (response.usage.cache_read_input_tokens || 0);
+      res.locals.usage = { input: inputTotal, output: response.usage.output_tokens || 0 };
+    }
     res.json(response);
   } catch (err) {
-    console.error('API error:', err);
+    logger.error(`API error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -356,6 +386,10 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
       if (lastUsage) {
         recordUsage(agentUsage, req.agent.name, lastUsage);
         saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
+        res.locals.usage = {
+          input: (lastUsage.input_tokens || 0) + (lastUsage.cache_creation_input_tokens || 0) + (lastUsage.cache_read_input_tokens || 0),
+          output: lastUsage.output_tokens || 0,
+        };
       }
       res.end();
     } else {
@@ -363,10 +397,16 @@ app.post('/v1/messages', requireAgentToken, (req, res, next) => enforceTokenLimi
         recordUsage(agentUsage, req.agent.name, response.usage);
         saveUsage(agentUsagePath, agentUsage, new Set(agentTokens.map(t => t.name)));
       }
+      if (response.usage) {
+        const inputTotal = (response.usage.input_tokens || 0)
+          + (response.usage.cache_creation_input_tokens || 0)
+          + (response.usage.cache_read_input_tokens || 0);
+        res.locals.usage = { input: inputTotal, output: response.usage.output_tokens || 0 };
+      }
       res.json(response);
     }
   } catch (err) {
-    console.error('API error:', err);
+    logger.error(`API error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -400,5 +440,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+logger.info(`✅ Server running on http://localhost:${PORT}`);
 });
