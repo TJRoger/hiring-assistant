@@ -12,23 +12,23 @@ AI-powered recruiting tool - evaluate resumes, generate tailored interview quest
 
 ## Quick Start
 
-\`\`\`bash
+```bash
 npm install
 cp .env.example .env
 # Edit .env: add ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN, set SESSION_SECRET
 cp config/users.example.json config/users.json
 # Edit config/users.json: add your users
 npm run dev:full
-\`\`\`
+```
 
 Open http://localhost:5173
 
 ## Production Build
 
-\`\`\`bash
+```bash
 npm run build
 npm start
-\`\`\`
+```
 
 ## Get Your API Key
 
@@ -45,10 +45,10 @@ Sign up at https://console.anthropic.com and create an API key, or use a compati
 4. Deploy
 
 ### Docker
-\`\`\`bash
+```bash
 docker build -t hiring-assistant .
 docker run -p 3001:3001 -e ANTHROPIC_API_KEY=your-key hiring-assistant
-\`\`\`
+```
 
 ## Tech Stack
 
